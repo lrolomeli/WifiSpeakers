@@ -37,22 +37,18 @@
  * Includes
  ******************************************************************************/
 #include "lwip/opt.h"
-
 #if LWIP_NETCONN
-
 #include "udpecho/udpecho.h"
+#include "tcpecho/tcpecho.h"
 #include "lwip/tcpip.h"
 #include "netif/ethernet.h"
 #include "ethernetif.h"
-
 #include "board.h"
-
 #include "fsl_device_registers.h"
 #include "pin_mux.h"
 #include "clock_config.h"
-/*******************************************************************************
- * Definitions
- ******************************************************************************/
+#include "fsl_pit.h"
+#include "fsl_dac.h"
 
 /* IP address configuration. */
 #define configIP_ADDR0 192
@@ -88,6 +84,7 @@
 /*! @brief Priority of the temporary lwIP initialization thread. */
 #define INIT_THREAD_PRIO DEFAULT_THREAD_PRIO
 
+#define PIT_SOURCE_CLOCK CLOCK_GetFreq(kCLOCK_BusClk)
 /*******************************************************************************
 * Prototypes
 ******************************************************************************/
@@ -136,7 +133,7 @@ static void stack_init(void *arg)
     PRINTF("************************************************\r\n");
 
     udpecho_init();
-
+    tcpecho_init();
     vTaskDelete(NULL);
 }
 
@@ -145,12 +142,37 @@ static void stack_init(void *arg)
  */
 int main(void)
 {
+
     SYSMPU_Type *base = SYSMPU;
     BOARD_InitPins();
     BOARD_BootClockRUN();
     BOARD_InitDebugConsole();
     /* Disable SYSMPU. */
     base->CESR &= ~SYSMPU_CESR_VLD_MASK;
+
+	/* Structure of initialize PIT */
+	pit_config_t config_pit;
+	dac_config_t dac_config;
+
+	DAC_GetDefaultConfig(&dac_config);
+	/* DAC Initialization */
+	DAC_Init(DAC0, &dac_config);
+	/* Enable output. */
+	DAC_Enable(DAC0, true);
+	/* Make sure the read pointer to the start. */
+	DAC_SetBufferReadPointer(DAC0, 0U);
+    CLOCK_EnableClock(kCLOCK_Pit0);
+	PIT_GetDefaultConfig(&config_pit);
+
+	/* Init pit module */
+	PIT_Init(PIT, &config_pit);
+
+	/* Set timer period for channel 0 */
+	PIT_SetTimerPeriod(PIT, kPIT_Chnl_0, USEC_TO_COUNT(23, PIT_SOURCE_CLOCK));
+	PIT_EnableInterrupts(PIT, kPIT_Chnl_0, kPIT_TimerInterruptEnable);
+    EnableIRQ(PIT0_IRQn);
+    NVIC_SetPriority(PIT0_IRQn, 5);
+
 
     /* Initialize lwIP from thread */
     if(sys_thread_new("main", stack_init, NULL, INIT_THREAD_STACKSIZE, INIT_THREAD_PRIO) == NULL)

@@ -29,74 +29,122 @@
  * Author: Adam Dunkels <adam@sics.se>
  *
  */
-
 #include "udpecho.h"
-
 #include "lwip/opt.h"
 
 #if LWIP_NETCONN
 
 #include "lwip/api.h"
 #include "lwip/sys.h"
-
 #include "FreeRTOS.h"
 #include "task.h"
+#include <stdio.h>
+#include "board.h"
+#include "pin_mux.h"
+#include "clock_config.h"
+#include "MK64F12.h"
+#include "fsl_dac.h"
+#include "fsl_pit.h"
 
-static void
-server_thread(void *arg)
+void background(unsigned short int * buffer);
+
+unsigned short int bufferA[400];
+unsigned short int bufferB[400];
+
+unsigned short int * back_buffer = bufferA;
+unsigned short int * active_buffer = bufferB;
+
+unsigned char empty_buffer = 0;
+
+static unsigned short index = 0;
+
+void PIT0_IRQHandler()
 {
+	PIT_ClearStatusFlags(PIT, kPIT_Chnl_0, kPIT_TimerFlag);
+
+	/* DAC value to be send */
+	DAC_SetBufferValue(DAC0, 0U, (uint16_t) active_buffer[index]);
+
+	if(index == 399)
+	{
+		index = 0;
+		empty_buffer = 1;
+	}
+	else
+	{
+		index++;
+	}
+
+}
+
+static void server_thread(void *arg)
+{
+
 	struct netconn *conn;
 	struct netbuf *buf;
 
-	char *msg;
+	unsigned short int *msg;
 
 	uint16_t len;
 
 	LWIP_UNUSED_ARG(arg);
 	conn = netconn_new(NETCONN_UDP);
 	netconn_bind(conn, IP_ADDR_ANY, 50001);
-	//LWIP_ERROR("udpecho: invalid conn", (conn != NULL), return;);
+	//LW_IP_ERROR("udpecho: invalid conn", (conn != NULL), return;);
 
 	while (1)
 	{
+
+		netconn_bind(conn, IP_ADDR_ANY, 50001);
 		netconn_recv(conn, &buf);
-		netbuf_data(buf, (void**)&msg, &len);
+		netbuf_data(buf, (void**) &msg, &len);
+		background(msg);
 		netbuf_delete(buf);
 
 	}
+
 }
 
-/*-----------------------------------------------------------------------------------*/
-static void
-client_thread(void *arg)
+void udpecho_init(void)
 {
-	ip_addr_t dst_ip;
-	struct netconn *conn;
-	struct netbuf *buf;
 
-	LWIP_UNUSED_ARG(arg);
-	conn = netconn_new(NETCONN_UDP);
-	//LWIP_ERROR("udpecho: invalid conn", (conn != NULL), return;);
+	sys_thread_new("server", server_thread, NULL, 300, 1);
 
-	char *msg = "Hello loopback!";
-	buf = netbuf_new();
-	netbuf_ref(buf,msg,10);
+}
 
-	IP4_ADDR(&dst_ip, 192, 168, 1, 102);
+void background(unsigned short int * buffer)
+{
+	unsigned short i;
+	static unsigned char buffer_ptr = 0;
 
-	while (1)
+	/* Fills the back buffer while foreground sends to DAC */
+	for (i = 0; i < 400; i++)
 	{
-		netconn_sendto(conn, buf, &dst_ip, 50001);
-		vTaskDelay(1000);
+		back_buffer[i] = buffer[i];
 	}
-}
-/*-----------------------------------------------------------------------------------*/
-void
-udpecho_init(void)
-{
-	//sys_thread_new("client", client_thread, NULL, 300, 1);
-	sys_thread_new("server", server_thread, NULL, 300, 2);
+
+	if(empty_buffer)
+	{
+
+		empty_buffer = 0;
+
+		if(buffer_ptr)
+		{
+			buffer_ptr = 0;
+			active_buffer = bufferA;
+			back_buffer = bufferB;
+		}
+
+		else
+		{
+			buffer_ptr = 1;
+			active_buffer = bufferB;
+			back_buffer = bufferA;
+		}
+
+	}
 
 }
+
 
 #endif /* LWIP_NETCONN */

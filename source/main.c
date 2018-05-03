@@ -169,9 +169,14 @@ int main(void)
 
 	/* Set timer period for channel 0 */
 	PIT_SetTimerPeriod(PIT, kPIT_Chnl_0, USEC_TO_COUNT(23, PIT_SOURCE_CLOCK));
+	PIT_SetTimerPeriod(PIT, kPIT_Chnl_1, MSEC_TO_COUNT(1000U, PIT_SOURCE_CLOCK));
+
 	PIT_EnableInterrupts(PIT, kPIT_Chnl_0, kPIT_TimerInterruptEnable);
+	PIT_EnableInterrupts(PIT, kPIT_Chnl_1, kPIT_TimerInterruptEnable);
+
     EnableIRQ(PIT0_IRQn);
     NVIC_SetPriority(PIT0_IRQn, 5);
+
 
 
     /* Initialize lwIP from thread */

@@ -30,7 +30,7 @@
  *
  */
 #include "tcpecho.h"
-
+#include "udpecho/udpecho.h"
 #include "lwip/opt.h"
 
 #if LWIP_NETCONN
@@ -38,10 +38,6 @@
 #include "lwip/sys.h"
 #include "lwip/api.h"
 #include "fsl_pit.h"
-#define ONE 1
-#define ZERO 0
-#define PORTSELECT1  50001
-#define PORTSELECT2  50002
 
 enum{
 	STOP_DAC = 0, RUN_DAC
@@ -52,22 +48,26 @@ typedef struct state
 	void (*ptr)(void); /**pointer to function*/
 } State;
 
-uint8_t  port = 0;
-uint8_t  portselect = 0;
 
+volatile static unsigned char port_flag;
+static unsigned char characteristics;
+unsigned char perc_quality[3];
+unsigned char statisticsflag;
 
+void waitfunc(void);
+void play_stop(void);
+void select_audio(void);
+void digiToAscii(unsigned char data);
+void statistics(void);
 
-
-void waitfunc();
-void play_stop();
-void select_audio();
-void statistics();
-
-static const State menu_state[4] = { {waitfunc}, {play_stop}, {select_audio},
+static const State menu_state[4] = {
+		{waitfunc},
+		{play_stop},
+		{select_audio},
 		{statistics} };
 
 
-void waitfunc()
+void waitfunc(void)
 {
 
 }
@@ -87,25 +87,35 @@ void play_stop()
 	}
 }
 
-void select_audio()
+void digiToAscii(unsigned char data)
 {
-	static uint8_t flagtoport;
+	if (data >= 10 && data <= 99)
+	{
 
-	if(ZERO == flagtoport)
-	{
-		port = PORTSELECT1;
+		perc_quality[2] = (data / 10) + '0';
+		perc_quality[1] = ((data % 10)) + '0';
+		perc_quality[0] = '%';
 	}
-	else
+
+	else if (data >= 0 && data <= 9)
 	{
-		port = PORTSELECT2;
+		perc_quality[2] = '0';
+		perc_quality[1] = data + '0';
+		perc_quality[0] = '%';
 	}
 }
 
-
-void statistics()
+void select_audio(void)
 {
+	port_flag = 1;
+}
 
 
+void statistics(void)
+{
+	statisticsflag = 1;
+	characteristics = get_quality() + '0';
+	digiToAscii(characteristics);
 }
 
 static void tcpecho_thread(void *arg)
@@ -127,7 +137,6 @@ static void tcpecho_thread(void *arg)
 
 	/* Tell connection to go into listening mode. */
 	netconn_listen(conn);
-
 	while (1)
 	{
 
@@ -156,7 +165,11 @@ static void tcpecho_thread(void *arg)
 					no_menu = no_menu - '0';
 
 					menu_state[no_menu].ptr();
-
+					if (statisticsflag)
+					{
+						statisticsflag = 0;
+						err = netconn_write(newconn, (void *) perc_quality, 3, NETCONN_COPY);
+					}
 					err = netconn_write(newconn, menu, 45, NETCONN_COPY);
 #if 0
 					if (err != ERR_OK)
@@ -164,9 +177,7 @@ static void tcpecho_thread(void *arg)
 						printf("tcpecho: netconn_write: error \"%s\"\n", lwip_strerr(err));
 					}
 #endif
-
 				} while (netbuf_next(buf) >= 0);
-
 				netbuf_delete(buf);
 			}
 			/*printf("Got EOF, looping\n");*/
@@ -174,13 +185,23 @@ static void tcpecho_thread(void *arg)
 			netconn_close(newconn);
 			netconn_delete(newconn);
 		}
-
 	}
 }
 
 void tcpecho_init(void)
 {
-  sys_thread_new("tcpecho_thread", tcpecho_thread, NULL, DEFAULT_THREAD_STACKSIZE, DEFAULT_THREAD_PRIO);
+	sys_thread_new("tcpecho_thread", tcpecho_thread, NULL, 200, 1);
 }
+
+unsigned char  get_port_flag(void)
+{
+	return port_flag;
+}
+
+void set_port_flag(void)
+{
+	port_flag = 0;
+}
+
 
 #endif /* LWIP_NETCONN */

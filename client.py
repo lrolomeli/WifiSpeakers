@@ -1,7 +1,7 @@
 import socket
 from scipy.io import wavfile
 import time
-import sounddevice as sd
+#import sounddevice as sd
 """
 THIS IS FOR UDP SENDING
 """

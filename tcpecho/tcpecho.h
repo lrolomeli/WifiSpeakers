@@ -35,4 +35,9 @@
 
 void tcpecho_init(void);
 
+void set_port_flag(void);
+unsigned char get_port_flag(void);
+
+
+
 #endif /* LWIP_TCPECHO_H */

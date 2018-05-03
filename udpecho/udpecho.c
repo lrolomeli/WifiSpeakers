@@ -31,20 +31,20 @@
  */
 #include "udpecho.h"
 #include "lwip/opt.h"
-
+#include "tcpecho/tcpecho.h"
 #if LWIP_NETCONN
 
 #include "lwip/api.h"
 #include "lwip/sys.h"
 #include "FreeRTOS.h"
 #include "task.h"
-#include <stdio.h>
 #include "board.h"
 #include "pin_mux.h"
 #include "clock_config.h"
 #include "MK64F12.h"
 #include "fsl_dac.h"
 #include "fsl_pit.h"
+
 
 void background(unsigned short int * buffer);
 
@@ -54,28 +54,58 @@ unsigned short int bufferB[400];
 unsigned short int * back_buffer = bufferA;
 unsigned short int * active_buffer = bufferB;
 
-unsigned char empty_buffer = 0;
-
-static unsigned short index = 0;
+volatile unsigned short index = 0;
+unsigned char package_counter = 0;
+unsigned char quality = 0;
+volatile unsigned char buffer_ptr = 0;
 
 void PIT0_IRQHandler()
 {
-	PIT_ClearStatusFlags(PIT, kPIT_Chnl_0, kPIT_TimerFlag);
 
-	/* DAC value to be send */
-	DAC_SetBufferValue(DAC0, 0U, (uint16_t) active_buffer[index]);
 
-	if(index == 399)
+	if(PIT_GetStatusFlags(PIT, kPIT_Chnl_0))
 	{
-		index = 0;
-		empty_buffer = 1;
-	}
-	else
-	{
-		index++;
+		PIT_ClearStatusFlags(PIT, kPIT_Chnl_0, kPIT_TimerFlag);
+		/* DAC value to be send */
+		/*DAC_SetBufferValue(DAC0, 0U, (uint16_t) active_buffer[index]);*/
+
+		if(index < 400)
+		{
+			/* DAC value to be send */
+			DAC_SetBufferValue(DAC0, 0U, (uint16_t) active_buffer[index]);
+			index++;
+		}
+
+		else
+		{
+
+			if(buffer_ptr)
+			{
+				buffer_ptr = 0;
+				active_buffer = bufferA;
+				back_buffer = bufferB;
+			}
+
+			else
+			{
+				buffer_ptr = 1;
+				active_buffer = bufferB;
+				back_buffer = bufferA;
+			}
+
+			index=0;
+			DAC_SetBufferValue(DAC0, 0U, (uint16_t) 2047);
+		}
 	}
 
+	if(PIT_GetStatusFlags(PIT, kPIT_Chnl_1))
+	{
+		PIT_ClearStatusFlags(PIT, kPIT_Chnl_1, kPIT_TimerFlag);
+		quality = ((package_counter/109)*100);
+		package_counter = 0;
+	}
 }
+
 
 static void server_thread(void *arg)
 {
@@ -84,38 +114,49 @@ static void server_thread(void *arg)
 	struct netbuf *buf;
 
 	unsigned short int *msg;
+	static unsigned char port_switch = 1;
 
 	uint16_t len;
 
 	LWIP_UNUSED_ARG(arg);
 	conn = netconn_new(NETCONN_UDP);
-	netconn_bind(conn, IP_ADDR_ANY, 50001);
 	//LW_IP_ERROR("udpecho: invalid conn", (conn != NULL), return;);
-
+	netconn_bind(conn, IP_ADDR_ANY, 50001);
+	PIT_StartTimer(PIT, kPIT_Chnl_1);
 	while (1)
 	{
-
-		netconn_bind(conn, IP_ADDR_ANY, 50001);
+		if (get_port_flag())
+		{
+			set_port_flag();
+			if (port_switch)
+			{
+				netconn_bind(conn, IP_ADDR_ANY, 50001);
+				port_switch = 0;
+			}
+			else
+			{
+				netconn_bind(conn, IP_ADDR_ANY, 50003);
+				port_switch = 1;
+			}
+		}
 		netconn_recv(conn, &buf);
+		package_counter++;
 		netbuf_data(buf, (void**) &msg, &len);
 		background(msg);
 		netbuf_delete(buf);
-
 	}
-
 }
 
 void udpecho_init(void)
 {
 
-	sys_thread_new("server", server_thread, NULL, 300, 1);
+	sys_thread_new("server", server_thread, NULL, 200, 2);
 
 }
 
 void background(unsigned short int * buffer)
 {
 	unsigned short i;
-	static unsigned char buffer_ptr = 0;
 
 	/* Fills the back buffer while foreground sends to DAC */
 	for (i = 0; i < 400; i++)
@@ -123,28 +164,13 @@ void background(unsigned short int * buffer)
 		back_buffer[i] = buffer[i];
 	}
 
-	if(empty_buffer)
-	{
-
-		empty_buffer = 0;
-
-		if(buffer_ptr)
-		{
-			buffer_ptr = 0;
-			active_buffer = bufferA;
-			back_buffer = bufferB;
-		}
-
-		else
-		{
-			buffer_ptr = 1;
-			active_buffer = bufferB;
-			back_buffer = bufferA;
-		}
-
-	}
-
 }
 
+unsigned char get_quality(void)
+{
+
+	return quality;
+
+}
 
 #endif /* LWIP_NETCONN */

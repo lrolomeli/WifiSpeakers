@@ -33,5 +33,6 @@
 #define LWIP_UDPECHO_H
 
 void udpecho_init(void);
+unsigned char get_quality(void);
 
 #endif /* LWIP_UDPECHO_H */

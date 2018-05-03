@@ -45,11 +45,13 @@
 #include "fsl_dac.h"
 #include "fsl_pit.h"
 
+#define BUFFER_SIZE 400
+#define PACKAGE_PER_SEC 109
 
 void background(unsigned short int * buffer);
 
-unsigned short int bufferA[400];
-unsigned short int bufferB[400];
+unsigned short int bufferA[BUFFER_SIZE];
+unsigned short int bufferB[BUFFER_SIZE];
 
 unsigned short int * back_buffer = bufferA;
 unsigned short int * active_buffer = bufferB;
@@ -59,26 +61,44 @@ unsigned char package_counter = 0;
 unsigned char quality = 0;
 volatile unsigned char buffer_ptr = 0;
 
+/**********************************************
+ *	PIT IRQ HANDLER
+ *
+ * Basically to have more power and less time
+ * wasted, we are doing almost every decision
+ * to play on Digital Analog Converter
+ * specific samples here in the Periodic
+ * Interrupt Timer Handler.
+ *
+ * Down here it is explained every statement
+ * and why it is not in a task.
+ *
+ *********************************************/
 void PIT0_IRQHandler()
 {
 
 
 	if(PIT_GetStatusFlags(PIT, kPIT_Chnl_0))
 	{
+		/* Clear PIT Hardware flag */
 		PIT_ClearStatusFlags(PIT, kPIT_Chnl_0, kPIT_TimerFlag);
-		/* DAC value to be send */
-		/*DAC_SetBufferValue(DAC0, 0U, (uint16_t) active_buffer[index]);*/
 
-		if(index < 400)
+		/* Once index get to BUFFER_SIZE, it means the buffer is empty or we should not
+		 * send more values through the digital analog converter. */
+		if(index < BUFFER_SIZE)
 		{
 			/* DAC value to be send */
 			DAC_SetBufferValue(DAC0, 0U, (uint16_t) active_buffer[index]);
 			index++;
 		}
 
+		/* Instead we should be sending zeros or something more valid
+		 * as a value equals to the average of the 12 bit DAC */
 		else
 		{
 
+			/* This code here works as a ping-pong buffer alternating
+			 * pointers to buffers when active buffer is empty*/
 			if(buffer_ptr)
 			{
 				buffer_ptr = 0;
@@ -93,7 +113,9 @@ void PIT0_IRQHandler()
 				back_buffer = bufferA;
 			}
 
+			/* at this point buffer should be full again */
 			index=0;
+
 			DAC_SetBufferValue(DAC0, 0U, (uint16_t) 2047);
 		}
 	}
@@ -101,12 +123,17 @@ void PIT0_IRQHandler()
 	if(PIT_GetStatusFlags(PIT, kPIT_Chnl_1))
 	{
 		PIT_ClearStatusFlags(PIT, kPIT_Chnl_1, kPIT_TimerFlag);
-		quality = ((package_counter/109)*100);
+		quality = ((package_counter / PACKAGE_PER_SEC) * 100);
 		package_counter = 0;
 	}
 }
 
-
+/**********************************************
+ *	UDP SERVER TASK
+ *
+ *
+ *
+ *********************************************/
 static void server_thread(void *arg)
 {
 
@@ -147,6 +174,10 @@ static void server_thread(void *arg)
 	}
 }
 
+/**********************************************
+ *	Creation of the server task in UDP
+ *
+ *********************************************/
 void udpecho_init(void)
 {
 
@@ -154,18 +185,29 @@ void udpecho_init(void)
 
 }
 
+/**********************************************
+ *	Fills the buffer every time a UDP package
+ *	enters and interrupts.
+ *
+ *********************************************/
 void background(unsigned short int * buffer)
 {
-	unsigned short i;
+	unsigned short fill_index;
 
 	/* Fills the back buffer while foreground sends to DAC */
-	for (i = 0; i < 400; i++)
+	for (fill_index = 0; fill_index < BUFFER_SIZE; fill_index++)
 	{
-		back_buffer[i] = buffer[i];
+		back_buffer[fill_index] = buffer[fill_index];
 	}
 
 }
 
+/**********************************************
+ *	Returns the value percentage previously
+ *	calculated every second in channel 1 PIT0
+ *	HANDLER.
+ *
+ *********************************************/
 unsigned char get_quality(void)
 {
 

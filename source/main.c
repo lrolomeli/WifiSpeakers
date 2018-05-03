@@ -85,13 +85,6 @@
 #define INIT_THREAD_PRIO DEFAULT_THREAD_PRIO
 
 #define PIT_SOURCE_CLOCK CLOCK_GetFreq(kCLOCK_BusClk)
-/*******************************************************************************
-* Prototypes
-******************************************************************************/
-
-/*******************************************************************************
-* Variables
-******************************************************************************/
 
 /*******************************************************************************
  * Code
@@ -132,8 +125,12 @@ static void stack_init(void *arg)
            ((u8_t *)&fsl_netif0_gw)[2], ((u8_t *)&fsl_netif0_gw)[3]);
     PRINTF("************************************************\r\n");
 
+    /* Create server UDP task */
     udpecho_init();
+
+    /* Create server TCP task */
     tcpecho_init();
+
     vTaskDelete(NULL);
 }
 
@@ -161,23 +158,29 @@ int main(void)
 	DAC_Enable(DAC0, true);
 	/* Make sure the read pointer to the start. */
 	DAC_SetBufferReadPointer(DAC0, 0U);
+
     CLOCK_EnableClock(kCLOCK_Pit0);
+
 	PIT_GetDefaultConfig(&config_pit);
 
 	/* Init pit module */
 	PIT_Init(PIT, &config_pit);
 
-	/* Set timer period for channel 0 */
+	/* Set timer period to 23u seconds for 43.478 kHz for channel 0 */
 	PIT_SetTimerPeriod(PIT, kPIT_Chnl_0, USEC_TO_COUNT(23, PIT_SOURCE_CLOCK));
+
+	/* Configure timer PIT0 period of 1 second for channel 1 */
 	PIT_SetTimerPeriod(PIT, kPIT_Chnl_1, MSEC_TO_COUNT(1000U, PIT_SOURCE_CLOCK));
 
+	/* Enable Interrupts of both PIT channels */
 	PIT_EnableInterrupts(PIT, kPIT_Chnl_0, kPIT_TimerInterruptEnable);
 	PIT_EnableInterrupts(PIT, kPIT_Chnl_1, kPIT_TimerInterruptEnable);
 
+	/* Enable Routine Interrupt of PIT0 */
     EnableIRQ(PIT0_IRQn);
+
+    /* Set priority for Routine */
     NVIC_SetPriority(PIT0_IRQn, 5);
-
-
 
     /* Initialize lwIP from thread */
     if(sys_thread_new("main", stack_init, NULL, INIT_THREAD_STACKSIZE, INIT_THREAD_PRIO) == NULL)

@@ -39,7 +39,11 @@
 #include "lwip/api.h"
 #include "fsl_pit.h"
 
-enum{
+#define MENU_MSG_SIZE 45
+#define QUALITY_MSG_SIZE 4
+
+enum
+{
 	STOP_DAC = 0, RUN_DAC
 };
 
@@ -48,11 +52,9 @@ typedef struct state
 	void (*ptr)(void); /**pointer to function*/
 } State;
 
-
-volatile static unsigned char port_flag;
-static unsigned char characteristics;
-unsigned char perc_quality[3];
-unsigned char statisticsflag;
+volatile unsigned char port_flag;
+volatile unsigned char statisticsflag;
+unsigned char perc_quality[QUALITY_MSG_SIZE];
 
 void waitfunc(void);
 void play_stop(void);
@@ -66,12 +68,23 @@ static const State menu_state[4] = {
 		{select_audio},
 		{statistics} };
 
-
+/**********************************************
+ * Useless function if we like to implement
+ * another characteristic this should work
+ * changing the conditional which is in thread.
+ *
+ *********************************************/
 void waitfunc(void)
 {
 
 }
 
+/**********************************************
+ * Only its waiting anybody to enter here, it
+ * is acting as a stop and play button, turning
+ * on and off the timer.
+ *
+ *********************************************/
 void play_stop()
 {
 	static unsigned char dac_run = 0;
@@ -87,37 +100,44 @@ void play_stop()
 	}
 }
 
-void digiToAscii(unsigned char data)
-{
-	if (data >= 10 && data <= 99)
-	{
-
-		perc_quality[2] = (data / 10) + '0';
-		perc_quality[1] = ((data % 10)) + '0';
-		perc_quality[0] = '%';
-	}
-
-	else if (data >= 0 && data <= 9)
-	{
-		perc_quality[2] = '0';
-		perc_quality[1] = data + '0';
-		perc_quality[0] = '%';
-	}
-}
-
+/**********************************************
+ * This function send a signal to UDP thread to
+ * interchange port from where we are listening
+ * the music.
+ *
+ *********************************************/
 void select_audio(void)
 {
 	port_flag = 1;
 }
 
-
+/**********************************************
+ * Raise the quality flag to show percentage
+ * in TCP task, converts the percentage into
+ * something readable by user with TCP echo.
+ *
+ *********************************************/
 void statistics(void)
 {
 	statisticsflag = 1;
-	characteristics = get_quality() + '0';
-	digiToAscii(characteristics);
+	digiToAscii(get_quality());
 }
 
+/**********************************************
+ *	Machine state building menus TCP network
+ *
+ * Description:
+ * - Open Connection or Socket
+ * - Associate connection with port
+ * - Listen when the client wants to
+ * 	 communicate and start three way handshake
+ * - Once connection is established it's ready
+ * - to start transmitting and receiving data
+ * - when data doesn't arrive right the
+ * 	 connection is restarted to send data
+ * 	 again.
+ *
+ *********************************************/
 static void tcpecho_thread(void *arg)
 {
 	struct netconn *conn, *newconn;
@@ -148,7 +168,7 @@ static void tcpecho_thread(void *arg)
 		{
 			struct netbuf *buf;
 			unsigned char *data;
-			static unsigned char menu[45] = "1) play/stop\n"
+			static unsigned char menu[MENU_MSG_SIZE] = "1) play/stop\n"
 					"2) select audio\n"
 					"3) statistics\n";
 
@@ -157,30 +177,40 @@ static void tcpecho_thread(void *arg)
 
 			while ((err = netconn_recv(newconn, &buf)) == ERR_OK)
 			{
-				/*printf("Recved\n");*/
 				do
 				{
 					netbuf_data(buf, (void*) &data, &len);
+					/* data extracted from headers of TCP/IP  */
 					no_menu = *data;
+
+					/* is converted from ASCII to integer to work with it in the menu */
 					no_menu = no_menu - '0';
 
-					menu_state[no_menu].ptr();
+					/* depending the number received by user he or she selects
+					 * a menu from our state machine */
+					if(no_menu < 4 && no_menu > 0)
+					{
+						menu_state[no_menu].ptr();
+					}
+
+					/* connection quality is being calculated every second
+					 * but only when menu 3 is selected the quality is shown
+					 * the function statistics raise this flag to tell this
+					 * task to write the percentage quality in socket APP. */
 					if (statisticsflag)
 					{
 						statisticsflag = 0;
-						err = netconn_write(newconn, (void *) perc_quality, 3, NETCONN_COPY);
+						err = netconn_write(newconn, (void *) perc_quality, QUALITY_MSG_SIZE, NETCONN_COPY);
 					}
-					err = netconn_write(newconn, menu, 45, NETCONN_COPY);
-#if 0
-					if (err != ERR_OK)
+
+					else
 					{
-						printf("tcpecho: netconn_write: error \"%s\"\n", lwip_strerr(err));
+						err = netconn_write(newconn, menu, MENU_MSG_SIZE, NETCONN_COPY);
 					}
-#endif
+
 				} while (netbuf_next(buf) >= 0);
 				netbuf_delete(buf);
 			}
-			/*printf("Got EOF, looping\n");*/
 			/* Close connection and discard connection identifier. */
 			netconn_close(newconn);
 			netconn_delete(newconn);
@@ -188,20 +218,62 @@ static void tcpecho_thread(void *arg)
 	}
 }
 
+/**********************************************
+ * Creates a new task for TCP menu that will
+ * be interacting with an user.
+ *
+ *********************************************/
 void tcpecho_init(void)
 {
 	sys_thread_new("tcpecho_thread", tcpecho_thread, NULL, 200, 1);
 }
 
+/**********************************************
+ *	This variable indicates whether the port
+ *	has to change.
+ *
+ *********************************************/
 unsigned char  get_port_flag(void)
 {
 	return port_flag;
 }
 
+/**********************************************
+ *	port_flag variable is cleared instantly
+ *	after being set by user so the user
+ *	can switch port again.
+ *
+ *********************************************/
 void set_port_flag(void)
 {
 	port_flag = 0;
 }
 
+/**********************************************
+ *	Integer to ASCII code function
+ *
+ * This one converts quality percentage
+ * into a character in ASCII to be readable
+ * in socket application on our smart phones.
+ *
+ *********************************************/
+void digiToAscii(unsigned char data)
+{
+	if (data >= 10 && data <= 99)
+	{
+		perc_quality[0] = (data / 10) + '0';
+		perc_quality[1] = ((data % 10)) + '0';
+		perc_quality[2] = '%';
+		perc_quality[3] = '\n';
+	}
+
+	else if (data >= 0 && data <= 9)
+	{
+		perc_quality[0] = '0';
+		perc_quality[1] = data + '0';
+		perc_quality[2] = '%';
+		perc_quality[3] = '\n';
+	}
+}
 
 #endif /* LWIP_NETCONN */

@@ -56,17 +56,24 @@ volatile unsigned char port_flag;
 volatile unsigned char statisticsflag;
 unsigned char perc_quality[QUALITY_MSG_SIZE];
 
-void waitfunc(void);
+
 void play_stop(void);
 void select_audio(void);
-void digiToAscii(unsigned char data);
 void statistics(void);
+void lowpass(void);
+void highpass(void);
+void bandpass(void);
+void digiToAscii(unsigned char data);
 
-static const State menu_state[4] = {
-		{waitfunc},
+
+static const State menu_state[6] = {
 		{play_stop},
 		{select_audio},
-		{statistics} };
+		{statistics},
+		{lowpass},
+		{highpass},
+		{bandpass}
+};
 
 /**********************************************
  * Useless function if we like to implement
@@ -74,8 +81,24 @@ static const State menu_state[4] = {
  * changing the conditional which is in thread.
  *
  *********************************************/
-void waitfunc(void)
+void lowpass(void)
 {
+
+	volumefreq1();
+
+}
+
+void highpass(void)
+{
+
+	volumefreq2();
+
+}
+
+void bandpass(void)
+{
+
+	volumefreq3();
 
 }
 
@@ -188,7 +211,7 @@ static void tcpecho_thread(void *arg)
 
 					/* depending the number received by user he or she selects
 					 * a menu from our state machine */
-					if(no_menu < 4 && no_menu > 0)
+					if(no_menu < 6 && no_menu >= 0)
 					{
 						menu_state[no_menu].ptr();
 					}

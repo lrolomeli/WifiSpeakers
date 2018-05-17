@@ -51,5 +51,8 @@ void udpecho_init(void);
  ********************************************************************************************/
 /********************************************************************************************/
 unsigned char get_quality(void);
+void volumefreq1(void);
+void volumefreq2(void);
+void volumefreq3(void);
 
 #endif /* LWIP_UDPECHO_H */

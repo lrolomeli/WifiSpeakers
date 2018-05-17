@@ -139,7 +139,6 @@ static void stack_init(void *arg)
  */
 int main(void)
 {
-
     SYSMPU_Type *base = SYSMPU;
     BOARD_InitPins();
     BOARD_BootClockRUN();

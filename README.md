@@ -1,10 +1,10 @@
 # Practica 2
 
-# Asignatura
+## Asignatura
 Sistemas Embebidos basados en Microcontroladores II
 
-# Proyecto
+## Proyecto
 Ethernet Speakers
 
-# Conceptos
+## Conceptos
 Networking, Python Programming, Audio, Frequency, DAC, RTOS
